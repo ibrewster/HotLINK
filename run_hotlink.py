@@ -5,6 +5,7 @@ import psycopg
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 import config
 import hotlink
@@ -31,6 +32,7 @@ VARIABLE_NAME_MAP = {
 }
 #############################
 
+
 @contextmanager
 def db_cursor(host, user, password, dbname=config.db_name, port=5432, autocommit=False):
     conn = psycopg.connect(host=host, user=user, password=password, dbname=dbname, port=port)
@@ -49,11 +51,16 @@ def db_cursor(host, user, password, dbname=config.db_name, port=5432, autocommit
         cursor.close()
         conn.close()
         
-def preevents_cursor(readonly=True):
+def preevents_cursor(readonly=True, autocommit=False):
+    """
+    Simple wrapper for the db_cursor context manager, defaulting all values
+    with a simple flag to switch between read-only and read-write user.
+    """
     user = config.db_read_user if readonly else config.db_write_user
     password = config.db_read_pass if readonly else config.db_write_pass
-    return db_cursor(config.db_host, user, password)
-        
+    return db_cursor(config.db_host, user, password, autocommit=autocommit)
+
+@lru_cache(maxsize=None)
 def load_volcs():
     # Load volcanoes from the PREEVENTS database
     with preevents_cursor() as cursor:
@@ -100,20 +107,21 @@ def get_datastream_mapping(location):
     }
     return mapping
 
-volcs = load_volcs()
+
 def get_volc(vent):
+    VOLCS = load_volcs()
     if isinstance(vent, str):
-        volc = volcs[volcs['name'].str.lower()==vent.lower()]
+        volc = VOLCS[VOLCS['name'].str.lower()==vent.lower()]
         if len(volc) == 0:
             raise ValueError("Specified volcano not found!")
     else:
-        dists = support_functions.haversine_np(vent[1], vent[0], volcs['lon'], volcs['lat'])
-        volc = volcs[dists==dists.min()]
+        dists = support_functions.haversine_np(vent[1], vent[0], VOLCS['lon'], VOLCS['lat'])
+        volc = VOLCS[dists==dists.min()]
         
     return volc.iloc[0]
         
    
-def get_latest(datastreams):
+def get_start(datastreams):
     # Group datastream_ids by sensor
     sensor_ids = {"viirs": [], "modis": []}
     for (result_key, sensor), datastream_id in datastreams.items():
@@ -122,23 +130,28 @@ def get_latest(datastreams):
             
     latest_timestamps = {}
     QUERY = """
-    SELECT MAX(timestamp) as latest_timestamp
+    SELECT COALESCE(
+        MAX(timestamp)+'1 minute'::interval,
+        now() - '7 days'::interval
+    ) as latest_timestamp
     FROM datavalues
     WHERE datastream_id = ANY(%s)
-    AND timestamp>=now()-'7 days'::interval
-    """
+    AND timestamp >= now() - '7 days'::interval
+"""
     with preevents_cursor() as cursor:
         for sensor, ids in sensor_ids.items():
             if ids: # Should always be true
                 cursor.execute(QUERY, (ids,))
                 result = cursor.fetchone()
-                latest_timestamps[sensor] = result[0] if result and result[0] else datetime.now(timezone.utc) - timedelta(days=7)
+                latest_timestamps[sensor] = result[0]
     
     return latest_timestamps
                 
             
 def run_hotlink(loc, elev, dates, sensor, mapping):
     results, meta = hotlink.get_results(loc, elev, dates, sensor)
+    
+    # Save results to PREEVENTS database
     with preevents_cursor(readonly=False) as cursor:
         for _, row in results.iterrows():
             sensor = row["Sensor"].lower() # Pull from results for good measure
@@ -171,7 +184,8 @@ def run_hotlink(loc, elev, dates, sensor, mapping):
                             (datastream_id, timestamp, float(row[result_key]))
                         )
                     else:
-                        print(f"Warning: No datastream_id for {result_key} with sensor {sensor}")            
+                        print(f"Warning: No datastream_id for {result_key} with sensor {sensor}")
+        cursor.connection.commit()
     
 
 def main():
@@ -185,11 +199,13 @@ def main():
         volc_name = volc['name']
         
         datastream_mapping = get_datastream_mapping(volc_name)
-        start_times = get_latest(datastream_mapping)
+        start_times = get_start(datastream_mapping)
         
         for sensor in ['viirs', 'modis']:
             start_time = start_times[sensor].strftime('%Y-%m-%dT%H:%M:00')
             dates = (start_time, end_time)
+            print(f"****Running {volc_name} {sensor} for {dates}")
+            
             run_hotlink(volc_name, elev, dates, sensor, datastream_mapping)
         print(f"Ran HotLINK for {loc} in {time.time() - t1} seconds")
             
