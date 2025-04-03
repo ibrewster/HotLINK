@@ -4,7 +4,7 @@ import time
 import psycopg
 
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from functools import lru_cache
 
 import config
@@ -129,9 +129,14 @@ def get_start(datastreams):
             sensor_ids[sensor].append(datastream_id)
             
     latest_timestamps = {}
+    
+    # Timestamps in the database are based on the filename, which is in 
+    # turn based on pass start. Searches, on the other hand, are based on 
+    # pass *end*, which is somewhat later. Hopefully 15 minutes is sufficient, 
+    # but we may need to adjust.
     QUERY = """
     SELECT COALESCE(
-        MAX(timestamp)+'1 minute'::interval,
+        MAX(timestamp)+'15 minute'::interval,
         now() - '7 days'::interval
     ) as latest_timestamp
     FROM datavalues
