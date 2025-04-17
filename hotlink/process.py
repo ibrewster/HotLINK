@@ -347,7 +347,7 @@ def get_results(
     prob_active = prediction[:,:,:,2] #map with probabilities of active class
 
     #highest probability per image, equated to probability that the image contains a hotspot
-    max_prob = numpy.max(prob_active, axis=(1, 2))
+    max_prob = numpy.round(numpy.max(prob_active, axis=(1, 2)), 3)
     prob_above_05 = numpy.count_nonzero(prob_active>0.5, axis=(1, 2))
 
     process_progress = tqdm.tqdm(
