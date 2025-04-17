@@ -424,21 +424,23 @@ def get_results(
     results['Satellite'] = file_meta.map(lambda x: x.get('satelite'))
     results['Data URL'] = file_meta.map(lambda x: x.get('url'))    
     
-    def save_images():        
-        ########## IMAGE SAVE/Data File Archive #################
-        # This section deals with saving PNG images and archiving
-        # the pre-processed data files. Remove this section if not
-        # desired
-        #########################################################
-        
-        # Save the .png images. Second loop, but this one doesn't lend itself to 
-        # parallel processing at all.
-        for idx, (image_date, img_file) in tqdm.tqdm(
-            enumerate(zip(img_dates, data_files)), 
-            total=len(img_dates),
-            unit="IMAGES",
-            desc="SAVING IMAGES"
-        ):
+    SAVE_IMAGES = False # TODO: make this a user passable flag somewhere.
+
+    for idx, (image_date, img_file) in tqdm.tqdm(
+        enumerate(zip(img_dates, data_files)), 
+        total=len(img_dates),
+        unit="IMAGES",
+        desc="SAVING IMAGES"
+    ):
+        if SAVE_IMAGES:        
+            ########## IMAGE SAVE/Data File Archive #################
+            # This section deals with saving PNG images and archiving
+            # the pre-processed data files. Remove this section if not
+            # desired
+            #########################################################
+            
+            # Save the .png images. Second loop, but this one doesn't lend itself to 
+            # parallel processing at all.        
             file_out_dir = _gen_output_dir(img_file, out_dir)
             file_out_dir.mkdir(parents=True, exist_ok=True)
             
@@ -454,7 +456,8 @@ def get_results(
             
             # slice_prob_active = prob_active[idx]
     
-            # Save probability matrix to a tiff file
+            # Optional: save probability GeoTIFF (currently disabled)
+            # NOTE: These files are EXTREAMLY tiny at only 24px x 24px
             # geotiff_file = output_dir / f"{img_file.stem}_probability.tif"
             # result['Probability TIFF'] = str(geotiff_file)
     
@@ -473,10 +476,9 @@ def get_results(
             
             # Move the processed data file to the output directory
             shutil.move(str(img_file), str(file_out_dir / img_file.name))
-        ###################### END IMAGE SECTION ###########################
-    
-    # Uncomment this line to save diagnostic images
-    # save_images()
+            ###################### END IMAGE SECTION ###########################
+            
+        img_file.unlink(missing_ok=True)
 
     meta['Result Count'] = len(results)
 
