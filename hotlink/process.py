@@ -371,7 +371,7 @@ def get_results(
             hotspot_mask,
             cellsize=RES,
             rp_constant=RP_CONSTANT
-        ) if hotspot_mask.any() else numpy.nan
+        ) if hotspot_mask.any() else 0
 
         result['Hotspot Radiative Power (W)'] = round(rp, 4)
 
